@@ -12,5 +12,11 @@ export const validationSchema = Joi.object({
   SWAGGER_ENABLE: Joi.string().valid('0', '1').default('1'),
   JWT_SECRET: Joi.string().min(32).optional(),
   JWT_ISSUER: Joi.string().optional(),
-  HEALTH_TOKEN: Joi.string().optional(),
+  HEALTH_TOKEN: Joi.string().optional().allow(''),
+  RESEND_API_KEY: Joi.string().optional().allow(''),
+  EMAIL_FROM: Joi.string().optional(),
+  EMAIL_FROM_NAME: Joi.string().optional(),
+  APP_NAME: Joi.string().optional(),
+  APP_URL: Joi.string().optional(),
+  SUPPORT_EMAIL: Joi.string().optional(),
 });

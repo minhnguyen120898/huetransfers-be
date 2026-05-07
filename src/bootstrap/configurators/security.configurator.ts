@@ -9,7 +9,7 @@ export class SecurityConfigurator implements IApplicationConfigurator {
     config: AppConfig,
   ): Promise<void> {
     if (!config.helmetEnabled) return;
-    await app.register(helmet, {
+    await app.register(helmet as any, {
       contentSecurityPolicy: config.isProduction ? undefined : false,
     });
   }
