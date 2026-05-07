@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  admin
+  user
+}
+
+enum CarBookingStatus {
+  confirmed
+  completed
+  cancelled
+  transferred
+}
+
+enum PaymentStatus {
+  pending
+  partial
+  completed
+}
+
+enum PaymentCollection {
+  no_collection
+  collect_from_guest
+}
+
+enum PaymentDirection {
+  received
+  paid
+}
+
+enum ActivityAction {
+  create
+  update
+  delete
+  login
+  export
+}
+
+enum PartnerType {
+  agency
+  guide
+  restaurant
+  transport
+}
+
+enum TransportType {
+  seats_4  @map("4")
+  seats_7  @map("7")
+  seats_16 @map("16")
+  seats_29 @map("29")
+  seats_45 @map("45")
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id                     String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email                  String    @unique @db.VarChar(255)
+  passwordHash           String    @map("password_hash") @db.VarChar(255)
+  fullName               String    @map("full_name") @db.VarChar(255)
+  tel                    String?   @db.VarChar(50)
+  avatarUrl              String?   @map("avatar_url") @db.VarChar(500)
+  role                   UserRole  @default(user)
+  isActive               Boolean   @default(true) @map("is_active")
+  emailVerified          Boolean   @default(false) @map("email_verified")
+  mustChangePassword     Boolean   @default(false) @map("must_change_password")
+  emailVerificationToken String?   @map("email_verification_token") @db.VarChar(255)
+  passwordResetToken     String?   @map("password_reset_token") @db.VarChar(255)
+  passwordResetExpires   DateTime? @map("password_reset_expires")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+  lastLogin              DateTime? @map("last_login")
+
+  refreshTokens         RefreshToken[]
+  activityLogs          ActivityLog[]
+  createdTravelAgencies TravelAgency[]  @relation("TravelAgencyCreatedBy")
+  updatedTravelAgencies TravelAgency[]  @relation("TravelAgencyUpdatedBy")
+  createdCarBookings    CarBooking[]    @relation("CarBookingCreatedBy")
+  updatedCarBookings    CarBooking[]    @relation("CarBookingUpdatedBy")
+  createdPaymentRecords PaymentRecord[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  jti        String    @unique @db.VarChar(100)
+  token      String    @unique @db.VarChar(500)
+  deviceInfo String?   @map("device_info") @db.VarChar(255)
+  ipAddress  String?   @map("ip_address") @db.VarChar(45)
+  expiresAt  DateTime  @map("expires_at")
+  isRevoked  Boolean   @default(false) @map("is_revoked")
+  revokedAt  DateTime? @map("revoked_at")
+  revokedBy  String?   @map("revoked_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastUsedAt DateTime? @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model TravelAgency {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  tel         String?  @db.VarChar(50)
+  address     String?  @db.Text
+  note        String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdById String?  @map("created_by") @db.Uuid
+  updatedById String?  @map("updated_by") @db.Uuid
+
+  createdBy              User?        @relation("TravelAgencyCreatedBy", fields: [createdById], references: [id])
+  updatedBy              User?        @relation("TravelAgencyUpdatedBy", fields: [updatedById], references: [id])
+  carBookings            CarBooking[] @relation("CarBookingAgency")
+  transferredCarBookings CarBooking[] @relation("CarBookingTransferredTo")
+
+  @@index([name])
+  @@map("travel_agencies")
+}
+
+model CarBooking {
+  id                    String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  bookingCode           String            @unique @map("booking_code") @db.VarChar(50)
+  travelAgencyId        String?           @map("travel_agency_id") @db.Uuid
+  vehicleType           TransportType     @map("vehicle_type")
+  serviceDate           DateTime          @map("service_date") @db.Date
+  guestName             String            @map("guest_name") @db.VarChar(255)
+  guestPhone            String?           @map("guest_phone") @db.VarChar(255)
+  guestCount            Int               @default(1) @map("guest_count")
+  pickupLocation        String?           @map("pickup_location") @db.Text
+  dropoffLocation       String?           @map("dropoff_location") @db.Text
+  vat                   Boolean           @default(false)
+  sellingPrice          Decimal           @map("selling_price") @db.Decimal(15, 2)
+  receivingPrice        Decimal           @map("receiving_price") @db.Decimal(15, 2)
+  debtAmount            Decimal           @map("debt_amount") @db.Decimal(15, 2)
+  paymentCollection     PaymentCollection @map("payment_collection")
+  paymentCollectionNote String?           @map("payment_collection_note") @db.Text
+  paymentStatus         PaymentStatus     @default(pending) @map("payment_status")
+  paidAt                DateTime?         @map("paid_at")
+  status                CarBookingStatus  @default(confirmed)
+  note                  String?           @db.Text
+  routes                String?           @db.Text
+  isTransfer            Boolean           @default(false) @map("is_transfer")
+  transferFromId        String?           @map("transfer_from_id") @db.Uuid
+  transferToAgencyId    String?           @map("transfer_to_agency_id") @db.Uuid
+  transferReason        String?           @map("transfer_reason") @db.Text
+  transferredAt         DateTime?         @map("transferred_at")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+  createdById           String?           @map("created_by") @db.Uuid
+  updatedById           String?           @map("updated_by") @db.Uuid
+
+  travelAgency     TravelAgency? @relation("CarBookingAgency", fields: [travelAgencyId], references: [id])
+  createdBy        User?         @relation("CarBookingCreatedBy", fields: [createdById], references: [id])
+  updatedBy        User?         @relation("CarBookingUpdatedBy", fields: [updatedById], references: [id])
+  transferFrom     CarBooking?   @relation("CarBookingTransfer", fields: [transferFromId], references: [id])
+  transferBookings CarBooking[]  @relation("CarBookingTransfer")
+  transferToAgency TravelAgency? @relation("CarBookingTransferredTo", fields: [transferToAgencyId], references: [id])
+
+  @@index([serviceDate])
+  @@index([status])
+  @@index([travelAgencyId, serviceDate, status, paymentStatus], name: "idx_car_agency_payment")
+  @@index([isTransfer])
+  @@index([transferFromId])
+  @@index([transferToAgencyId])
+  @@map("car_bookings")
+}
+
+model PaymentRecord {
+  id               String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  partnerType      PartnerType      @map("partner_type")
+  partnerId        String           @map("partner_id") @db.Uuid
+  debtRecordId     String?          @map("debt_record_id") @db.Uuid
+  paymentDirection PaymentDirection @map("payment_direction")
+  amount           Decimal          @db.Decimal(15, 2)
+  paymentDate      DateTime         @default(now()) @map("payment_date")
+  paymentMethod    String?          @map("payment_method") @db.VarChar(50)
+  referenceNumber  String?          @map("reference_number") @db.VarChar(100)
+  note             String?          @db.Text
+  receiptUrl       String?          @map("receipt_url") @db.VarChar(500)
+  createdAt        DateTime         @default(now()) @map("created_at")
+  createdById      String?          @map("created_by") @db.Uuid
+
+  createdBy User? @relation(fields: [createdById], references: [id])
+
+  @@index([partnerType, partnerId, paymentDate])
+  @@map("payment_records")
+}
+
+model ActivityLog {
+  id         String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId     String?        @map("user_id") @db.Uuid
+  action     ActivityAction
+  entityType String         @map("entity_type") @db.VarChar(50)
+  entityId   String?        @map("entity_id") @db.Uuid
+  oldValues  Json?          @map("old_values")
+  newValues  Json?          @map("new_values")
+  ipAddress  String?        @map("ip_address") @db.VarChar(50)
+  userAgent  String?        @map("user_agent") @db.Text
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
