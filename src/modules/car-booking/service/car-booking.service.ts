@@ -48,18 +48,20 @@ export class CarBookingService {
     dto: CreateCarBookingDto,
     userId?: string,
   ): Promise<CarBookingResponseDto> {
-    const agency = await this.prisma.travelAgency.findUnique({
-      where: { id: dto.travelAgencyId },
-    });
-    if (!agency) {
-      throw new NotFoundException(
-        `Travel agency with ID ${dto.travelAgencyId} not found`,
-      );
-    }
-    if (!agency.isActive) {
-      throw new BadRequestException(
-        `Travel agency "${agency.name}" is not active`,
-      );
+    if (dto.travelAgencyId) {
+      const agency = await this.prisma.travelAgency.findUnique({
+        where: { id: dto.travelAgencyId },
+      });
+      if (!agency) {
+        throw new NotFoundException(
+          `Travel agency with ID ${dto.travelAgencyId} not found`,
+        );
+      }
+      if (!agency.isActive) {
+        throw new BadRequestException(
+          `Travel agency "${agency.name}" is not active`,
+        );
+      }
     }
 
     const booking = await this.carBookingRepository.create({
