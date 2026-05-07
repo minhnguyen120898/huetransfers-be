@@ -217,6 +217,21 @@ exports.Prisma.PaymentRecordScalarFieldEnum = {
   createdById: 'createdById'
 };
 
+exports.Prisma.ExpenseScalarFieldEnum = {
+  id: 'id',
+  title: 'title',
+  amount: 'amount',
+  category: 'category',
+  month: 'month',
+  year: 'year',
+  note: 'note',
+  isActive: 'isActive',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt',
+  createdById: 'createdById',
+  updatedById: 'updatedById'
+};
+
 exports.Prisma.ActivityLogScalarFieldEnum = {
   id: 'id',
   userId: 'userId',
@@ -298,6 +313,14 @@ exports.PaymentDirection = exports.$Enums.PaymentDirection = {
   paid: 'paid'
 };
 
+exports.ExpenseCategory = exports.$Enums.ExpenseCategory = {
+  gasoline: 'gasoline',
+  maintenance: 'maintenance',
+  insurance: 'insurance',
+  bank: 'bank',
+  other: 'other'
+};
+
 exports.ActivityAction = exports.$Enums.ActivityAction = {
   create: 'create',
   update: 'update',
@@ -312,6 +335,7 @@ exports.Prisma.ModelName = {
   TravelAgency: 'TravelAgency',
   CarBooking: 'CarBooking',
   PaymentRecord: 'PaymentRecord',
+  Expense: 'Expense',
   ActivityLog: 'ActivityLog'
 };
 

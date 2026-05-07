@@ -40,6 +40,14 @@ enum PaymentDirection {
   paid
 }
 
+enum ExpenseCategory {
+  gasoline
+  maintenance
+  insurance
+  bank
+  other
+}
+
 enum ActivityAction {
   create
   update
@@ -92,6 +100,8 @@ model User {
   createdCarBookings    CarBooking[]    @relation("CarBookingCreatedBy")
   updatedCarBookings    CarBooking[]    @relation("CarBookingUpdatedBy")
   createdPaymentRecords PaymentRecord[]
+  createdExpenses       Expense[]       @relation("ExpenseCreatedBy")
+  updatedExpenses       Expense[]       @relation("ExpenseUpdatedBy")
 
   @@map("users")
 }
@@ -205,6 +215,30 @@ model PaymentRecord {
 
   @@index([partnerType, partnerId, paymentDate])
   @@map("payment_records")
+}
+
+model Expense {
+  id          String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  title       String          @db.VarChar(200)
+  amount      Decimal         @db.Decimal(15, 2)
+  category    ExpenseCategory
+  month       Int
+  year        Int
+  note        String?         @db.Text
+  isActive    Boolean         @default(true) @map("is_active")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  createdById String?         @map("created_by") @db.Uuid
+  updatedById String?         @map("updated_by") @db.Uuid
+
+  createdBy User? @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  updatedBy User? @relation("ExpenseUpdatedBy", fields: [updatedById], references: [id])
+
+  @@index([category])
+  @@index([year, month])
+  @@index([category, year, month])
+  @@index([isActive])
+  @@map("expenses")
 }
 
 model ActivityLog {

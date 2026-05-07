@@ -7,6 +7,8 @@ import { UserModule } from './modules/user/user.module';
 import { TravelAgencyModule } from './modules/travel-agency/travel-agency.module';
 import { CarBookingModule } from './modules/car-booking/car-booking.module';
 import { DebtModule } from './modules/debt/debt.module';
+import { ExpenseModule } from './modules/expense/expense.module';
+import { ProfitModule } from './modules/profit/profit.module';
 import { HealthModule } from './modules/health/health.module';
 import { validationSchema } from './config/env.validation';
 
@@ -28,6 +30,8 @@ import { validationSchema } from './config/env.validation';
     TravelAgencyModule,
     CarBookingModule,
     DebtModule,
+    ExpenseModule,
+    ProfitModule,
   ],
 })
 export class AppModule {}
