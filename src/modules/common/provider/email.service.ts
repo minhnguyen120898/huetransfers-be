@@ -101,7 +101,7 @@ export class EmailService {
     temporaryPassword: string,
   ): Promise<void> {
     const appName =
-      this.configService.get<string>('APP_NAME') || 'Tour Booking System';
+      this.configService.get<string>('APP_NAME') || 'Car Booking System';
     const appUrl =
       this.configService.get<string>('APP_URL') || 'http://localhost:3000';
     const supportEmail =

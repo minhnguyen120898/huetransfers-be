@@ -4,7 +4,17 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBadRequestResponse,
+  ApiBody,
+  ApiProperty,
 } from '@nestjs/swagger';
+
+class TestEmailDto {
+  @ApiProperty({
+    example: 'sales@huetransfers.net',
+    description: 'Recipient email address',
+  })
+  email: string;
+}
 import { EmailService } from '../common/provider/email.service';
 import { LoggerService } from '../common/provider/logger.service';
 
@@ -77,6 +87,7 @@ export class HealthController {
   @ApiBadRequestResponse({
     description: 'Invalid email or Resend API not configured',
   })
+  @ApiBody({ type: TestEmailDto })
   async testEmail(@Body('email') email: string) {
     if (!email) {
       return {
