@@ -26,7 +26,9 @@ export class CarProfitService {
     const period = { startDate, endDate };
 
     const [bookingAgg, transferBookings, expenseSummary] = await Promise.all([
-      // 1. Aggregate normal (non-transfer) bookings
+      // 1. Aggregate non-transfer bookings + original bookings that were transferred out.
+      // Including 'transferred' status ensures the original booking's sellingPrice is counted
+      // in grossRevenue before we deduct the full compensationAmount paid to the partner.
       this.prisma.carBooking.aggregate({
         where: {
           isTransfer: false,
@@ -88,9 +90,15 @@ export class CarProfitService {
       totalOriginalSellingPrice,
     );
 
-    // Build booking financials
+    // Build booking financials.
+    // grossRevenue includes original bookings that were transferred out (status='transferred'),
+    // so we must deduct the full compensationAmount (not just the delta) to get net revenue.
+    // Formula mirrors /profit/summary:
+    //   grossRevenue = originalSellingPrices (all non-compensation bookings)
+    //   transferDeductions = totalCompensationAmount (what we actually paid out)
+    //   revenue = grossRevenue - transferDeductions
     const grossRevenue = new Decimal(bookingAgg._sum.sellingPrice ?? 0);
-    const transferDeductions = netTransferCost;
+    const transferDeductions = totalCompensationAmount;
     const revenue = grossRevenue.minus(transferDeductions);
 
     // Build expense financials

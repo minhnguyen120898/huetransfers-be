@@ -40,11 +40,13 @@ describe('CarProfitService', () => {
     const month = 4;
 
     beforeEach(() => {
-      // Normal bookings aggregate: 3 bookings, 6 guests, 50_000_000 VND
+      // Non-compensation bookings (isTransfer=false, status in confirmed/completed/transferred):
+      // 3 normal bookings (50_000_000) + 1 original booking that was transferred out (5_000_000)
+      // = 4 bookings, 6 guests, 55_000_000 VND gross revenue
       mockPrisma.carBooking.aggregate.mockResolvedValueOnce({
-        _count: { id: 3 },
+        _count: { id: 4 },
         _sum: {
-          sellingPrice: new Decimal('50000000'),
+          sellingPrice: new Decimal('55000000'),
           guestCount: 6,
         },
       });
@@ -88,8 +90,9 @@ describe('CarProfitService', () => {
 
     it('returns correct booking financials', async () => {
       const result = await service.getCarMonthlyProfitSummary(year, month);
-      expect(result.bookingFinancials.grossRevenue.toString()).toBe('50000000');
-      expect(result.bookingFinancials.bookingCount).toBe(3);
+      // grossRevenue includes the original transferred booking (5_000_000) + 3 normal bookings (50_000_000)
+      expect(result.bookingFinancials.grossRevenue.toString()).toBe('55000000');
+      expect(result.bookingFinancials.bookingCount).toBe(4);
       expect(result.bookingFinancials.guestCount).toBe(6);
     });
 
@@ -108,10 +111,13 @@ describe('CarProfitService', () => {
 
     it('calculates revenue after transfer deductions', async () => {
       const result = await service.getCarMonthlyProfitSummary(year, month);
-      // revenue = 50000000 - 500000 = 49500000
+      // transferDeductions = totalCompensationAmount = 5_500_000
+      // revenue = grossRevenue(55_000_000) - compensationAmount(5_500_000) = 49_500_000
+      // Net effect: we earned 50_000_000 from normal bookings but gave away 5_000_000 original
+      // and paid 5_500_000 compensation → net revenue = 50_000_000 - 500_000 extra cost = 49_500_000
       expect(result.bookingFinancials.revenue.toString()).toBe('49500000');
       expect(result.bookingFinancials.transferDeductions.toString()).toBe(
-        '500000',
+        '5500000',
       );
     });
 
