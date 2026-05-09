@@ -65,6 +65,45 @@ const mockCarBooking2 = {
   note: 'Paid early',
 };
 
+// Transfer scenario: original booking transferred from Agency A, compensation for Agency B
+const mockOriginalTransferredBooking = {
+  id: 'cb-uuid-transferred',
+  bookingCode: 'CB-20260315-TRANSFER-ORIG',
+  serviceDate: new Date('2026-03-15'),
+  guestName: 'Le Van C',
+  guestPhone: '+84-902-222-222',
+  guestCount: 2,
+  vehicleType: 'seats_4',
+  routes: 'Airport → Hotel',
+  pickupLocation: 'Noi Bai Airport',
+  dropoffLocation: 'Old Quarter Hotel',
+  sellingPrice: new Decimal(1000000),
+  receivingPrice: new Decimal(200000),
+  debtAmount: new Decimal(800000), // sellingPrice - receivingPrice
+  paymentStatus: PaymentStatus.pending,
+  paidAt: null,
+  note: null,
+};
+
+const mockCompensationBooking = {
+  id: 'cb-uuid-compensation',
+  bookingCode: 'CB-20260315-TRANSFER-ORIG-TRANSFER',
+  serviceDate: new Date('2026-03-15'),
+  guestName: '[TRANSFER] Le Van C',
+  guestPhone: '+84-902-222-222',
+  guestCount: 2,
+  vehicleType: 'seats_4',
+  routes: 'Airport → Hotel',
+  pickupLocation: 'Noi Bai Airport',
+  dropoffLocation: 'Old Quarter Hotel',
+  sellingPrice: new Decimal(1000000),
+  receivingPrice: new Decimal(200000),
+  debtAmount: new Decimal(-800000), // NEGATIVE — we owe Agency B
+  paymentStatus: PaymentStatus.pending,
+  paidAt: null,
+  note: '[TRANSFER COMPENSATION]',
+};
+
 const mockPrisma = {
   travelAgency: {
     findMany: jest.fn(),
@@ -199,7 +238,7 @@ describe('CarBookingDebtService', () => {
       );
     });
 
-    it('always includes isTransfer=false in query (CRITICAL)', async () => {
+    it('does NOT filter out transfer compensation bookings (isTransfer not in query)', async () => {
       mockPrisma.travelAgency.findMany.mockResolvedValue([mockAgency]);
       mockPrisma.carBooking.aggregate.mockResolvedValue({
         _count: { id: 0 },
@@ -215,8 +254,8 @@ describe('CarBookingDebtService', () => {
 
       expect(mockPrisma.carBooking.aggregate).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            isTransfer: false, // Transfer compensation bookings ALWAYS excluded
+          where: expect.not.objectContaining({
+            isTransfer: expect.anything(),
           }),
         }),
       );
@@ -403,19 +442,89 @@ describe('CarBookingDebtService', () => {
       expect(report.agency.summary.previousMonthDebt?.toString()).toBe('0');
     });
 
-    it('always passes isTransfer=false in detail query (CRITICAL)', async () => {
+    it('does NOT filter out transfer compensation bookings in detail query', async () => {
       mockPrisma.travelAgency.findUnique.mockResolvedValue(mockAgency);
       mockPrisma.carBooking.findMany.mockResolvedValue([]);
+      mockPrisma.carBooking.aggregate.mockResolvedValue({
+        _sum: { debtAmount: null },
+      });
 
       await service.getCarBookingDebtDetailReport(2026, 3, 'agency-uuid-1');
 
       expect(mockPrisma.carBooking.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            isTransfer: false,
+          where: expect.not.objectContaining({
+            isTransfer: expect.anything(),
           }),
         }),
       );
+    });
+  });
+
+  // ============================================================
+  // Transfer scenario
+  // ============================================================
+  describe('Transfer scenario — both sides appear in debt report', () => {
+    it('Agency A (original): transferred booking appears with positive debtAmount', async () => {
+      mockPrisma.travelAgency.findUnique.mockResolvedValue(mockAgency);
+      mockPrisma.carBooking.findMany.mockResolvedValue([
+        mockOriginalTransferredBooking,
+      ]);
+      mockPrisma.carBooking.aggregate.mockResolvedValue({
+        _sum: { debtAmount: null },
+      }); // previousMonthDebt = 0
+
+      const result = await service.getCarBookingDebtDetailReport(
+        2026,
+        3,
+        'agency-uuid-1',
+      );
+
+      expect(result.agency.bookings).toHaveLength(1);
+      expect(result.agency.bookings[0].bookingCode).toBe(
+        'CB-20260315-TRANSFER-ORIG',
+      );
+      expect(Number(result.agency.summary.totalDebt)).toBe(800000);
+    });
+
+    it('Agency B (partner): compensation booking appears with negative debtAmount', async () => {
+      mockPrisma.travelAgency.findUnique.mockResolvedValue(mockAgency2);
+      mockPrisma.carBooking.findMany.mockResolvedValue([mockCompensationBooking]);
+      mockPrisma.carBooking.aggregate.mockResolvedValue({
+        _sum: { debtAmount: null },
+      }); // previousMonthDebt = 0
+
+      const result = await service.getCarBookingDebtDetailReport(
+        2026,
+        3,
+        'agency-uuid-2',
+      );
+
+      expect(result.agency.bookings).toHaveLength(1);
+      expect(result.agency.bookings[0].bookingCode).toBe(
+        'CB-20260315-TRANSFER-ORIG-TRANSFER',
+      );
+      expect(Number(result.agency.summary.totalDebt)).toBe(-800000);
+    });
+
+    it('list report: Agency B appears when compensation booking is in period', async () => {
+      mockPrisma.travelAgency.findMany.mockResolvedValue([mockAgency2]);
+      mockPrisma.carBooking.aggregate.mockResolvedValue({
+        _count: { id: 1 },
+        _sum: {
+          guestCount: 2,
+          sellingPrice: new Decimal(1000000),
+          receivingPrice: new Decimal(200000),
+          debtAmount: new Decimal(-800000),
+        },
+      });
+      mockPrisma.carBooking.count.mockResolvedValue(1); // allPaid = false
+
+      const result = await service.getCarBookingDebtListReport(2026, 3);
+
+      expect(result.agencies).toHaveLength(1);
+      expect(result.agencies[0].agency.id).toBe('agency-uuid-2');
+      expect(Number(result.agencies[0].summary.totalDebt)).toBe(-800000);
     });
   });
 

@@ -80,14 +80,13 @@ export interface CarBookingDebtDetailReport {
  *
  * QUERY RULES (enforced at query level, never user-configurable):
  * - status IN (confirmed, completed, transferred) → active bookings with debt
- * - isTransfer = false → exclude compensation bookings (internal records)
  * - serviceDate within period range
  *
  * FINANCIAL MODEL:
- * - debtAmount = sellingPrice - receivingPrice
- * - Positive debtAmount → agency owes us
- * - Transfer compensation bookings (isTransfer=true) excluded entirely
- *   — they represent what WE owe the partner, handled separately
+ * - debtAmount = sellingPrice - receivingPrice (positive = agency owes us)
+ * - Transfer compensation bookings (isTransfer=true) have NEGATIVE debtAmount
+ *   — they represent what WE owe the partner agency, and appear under that
+ *   partner agency's debt entry in the report.
  */
 @Injectable()
 export class CarBookingDebtService {
@@ -215,10 +214,13 @@ export class CarBookingDebtService {
    * Build the WHERE clause for car booking debt queries.
    *
    * CRITICAL rules always applied — never configurable by caller:
-   * 1. isTransfer = false — exclude compensation bookings
-   * 2. status IN (confirmed, completed, transferred) — active bookings
-   * 3. travelAgencyId = agencyId — agency-specific
-   * 4. serviceDate within [startDate, endDate]
+   * 1. status IN (confirmed, completed, transferred) — active bookings
+   * 2. travelAgencyId = agencyId — agency-specific
+   * 3. serviceDate within [startDate, endDate]
+   *
+   * NOTE: isTransfer is NOT filtered here. Transfer compensation bookings
+   * (isTransfer=true) appear under the partner agency with a negative debtAmount,
+   * which represents what we owe them. This mirrors the tour booking debt service.
    *
    * CarBooking uses serviceDate (not departureDate like tour Booking).
    */
@@ -230,10 +232,8 @@ export class CarBookingDebtService {
   ) {
     const where: Record<string, any> = {
       travelAgencyId: agencyId,
-      isTransfer: false, // ALWAYS exclude transfer compensation bookings
       serviceDate: { gte: startDate, lte: endDate },
       status: {
-        // confirmed = standard booking; completed = done; transferred = original still owes us
         in: ['confirmed', 'completed', 'transferred'],
       },
     };
@@ -425,7 +425,6 @@ export class CarBookingDebtService {
     const aggregation = await this.prisma.carBooking.aggregate({
       where: {
         travelAgencyId: agencyId,
-        isTransfer: false,
         serviceDate: {
           gte: startOfPreviousMonth,
           lte: endOfPreviousMonth,
