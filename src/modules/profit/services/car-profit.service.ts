@@ -40,9 +40,12 @@ export class CarProfitService {
       }),
 
       // 2. Fetch transfer compensation bookings with their originals
+      // Exclude cancelled bookings so that a cancelled transfer no longer
+      // appears as a deduction in the profit summary.
       this.prisma.carBooking.findMany({
         where: {
           isTransfer: true,
+          status: { notIn: ['cancelled'] },
           serviceDate: { gte: startDate, lte: endDate },
         },
         select: {
