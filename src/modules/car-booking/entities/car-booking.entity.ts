@@ -104,6 +104,10 @@ export class CarBookingEntity {
     return this.status === CarBookingStatus.confirmed && !this.isTransfer;
   }
 
+  canTransferBeCancelled(): boolean {
+    return this.status === CarBookingStatus.transferred;
+  }
+
   /**
    * Debt amount as number for calculations
    */
