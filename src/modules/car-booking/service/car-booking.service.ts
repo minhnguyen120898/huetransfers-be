@@ -525,6 +525,121 @@ export class CarBookingService {
   }
 
   // ============================================================
+  // CANCEL TRANSFER
+  // ============================================================
+
+  async cancelTransfer(
+    originalId: string,
+    userId?: string,
+  ): Promise<{
+    originalBooking: CarBookingResponseDto;
+    compensationBooking: CarBookingResponseDto;
+  }> {
+    this.logger.info(
+      `[CarBookingService] Attempting to cancel transfer for car booking ${originalId}`,
+    );
+
+    // Guard 1: booking exists
+    const original = await this.carBookingRepository.findById(originalId);
+    if (!original) {
+      throw new NotFoundException(`Car booking with ID ${originalId} not found`);
+    }
+
+    // Guard 2: must be in transferred status
+    if (!original.canTransferBeCancelled()) {
+      throw new BadRequestException(
+        `Cannot cancel transfer for car booking with status "${original.status}". ` +
+          `Only bookings with status "transferred" can have their transfer cancelled.`,
+      );
+    }
+
+    // Guard 3: serviceDate must be in the current month (UTC)
+    const now = new Date();
+    const currentMonth = now.getUTCMonth();
+    const currentYear = now.getUTCFullYear();
+    const serviceMonth = original.serviceDate.getUTCMonth();
+    const serviceYear = original.serviceDate.getUTCFullYear();
+
+    if (serviceYear !== currentYear || serviceMonth !== currentMonth) {
+      throw new BadRequestException(
+        `Cannot cancel transfer for car booking ${original.bookingCode}. ` +
+          `Transfer cancellation is only allowed in the same month as the service date ` +
+          `(${original.serviceDate.toISOString().slice(0, 7)}).`,
+      );
+    }
+
+    // Guard 4: original payment must not be completed
+    if (original.paymentStatus === PaymentStatus.completed) {
+      throw new BadRequestException(
+        `Cannot cancel transfer for car booking ${original.bookingCode}. ` +
+          `Original booking payment is already completed.`,
+      );
+    }
+
+    // Guard 5: compensation booking must exist
+    const compensationBooking = original.transferBookings?.find((b) => b.isTransfer);
+    if (!compensationBooking) {
+      throw new BadRequestException(
+        `Cannot cancel transfer for car booking ${original.bookingCode}. ` +
+          `No linked compensation booking found — data may be inconsistent.`,
+      );
+    }
+
+    // Guard 6: compensation payment must not be completed
+    if (compensationBooking.paymentStatus === PaymentStatus.completed) {
+      throw new BadRequestException(
+        `Cannot cancel transfer for car booking ${original.bookingCode}. ` +
+          `Compensation booking payment is already completed.`,
+      );
+    }
+
+    // Transaction: soft-cancel both bookings
+    const result = await this.prisma.$transaction(async (tx) => {
+      const cancelledOriginal = await tx.carBooking.update({
+        where: { id: originalId },
+        data: {
+          status: CarBookingStatus.cancelled,
+          updatedById: userId ?? null,
+        },
+        include: {
+          travelAgency: { select: { id: true, name: true, tel: true, address: true } },
+          transferBookings: true,
+          transferToAgency: { select: { id: true, name: true, tel: true } },
+        },
+      });
+
+      const cancelledCompensation = await tx.carBooking.update({
+        where: { id: compensationBooking.id },
+        data: {
+          status: CarBookingStatus.cancelled,
+          updatedById: userId ?? null,
+        },
+        include: {
+          travelAgency: { select: { id: true, name: true, tel: true, address: true } },
+          transferBookings: true,
+          transferToAgency: { select: { id: true, name: true, tel: true } },
+        },
+      });
+
+      return { cancelledOriginal, cancelledCompensation };
+    });
+
+    this.logger.info(
+      `[CarBookingService] Cancelled transfer for car booking ${original.bookingCode} ` +
+        `and compensation booking ${compensationBooking.bookingCode}`,
+    );
+
+    return {
+      originalBooking: this.mapToResponseDto(
+        this.mapPrismaToEntity(result.cancelledOriginal),
+      ),
+      compensationBooking: this.mapToResponseDto(
+        this.mapPrismaToEntity(result.cancelledCompensation),
+      ),
+    };
+  }
+
+  // ============================================================
   // HELPERS
   // ============================================================
 
