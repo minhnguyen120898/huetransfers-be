@@ -285,6 +285,47 @@ export class CarBookingController {
   }
 
   // ============================================================
+  // CANCEL TRANSFER
+  // ============================================================
+
+  // ⚠️ MUST be before @Delete(':id') — literal sub-path takes priority
+  @Delete(':id/transfer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel a transferred car booking',
+    description:
+      'Atomically cancels a transferred car booking and its linked compensation booking.\n\n' +
+      '**Guards:**\n' +
+      '- Booking must have status `transferred`\n' +
+      '- Service date must be in the current month (past months are frozen)\n' +
+      '- Neither the original nor the compensation booking may have `paymentStatus=completed`\n\n' +
+      '**Effect:** Both bookings are soft-cancelled. Debt and profit reports update automatically.',
+  })
+  @ApiParam({ name: 'id', description: 'ID of the original (transferred) car booking' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Both bookings cancelled successfully',
+  })
+  @ApiBadRequestResponse({
+    description: 'Guard failed — wrong status, past month, or payment already completed',
+  })
+  @ApiNotFoundResponse({ description: 'Car booking not found' })
+  async cancelTransfer(
+    @Param('id') id: string,
+    @Req() req: FastifyRequest,
+  ): Promise<{
+    originalBooking: CarBookingResponseDto;
+    compensationBooking: CarBookingResponseDto;
+  }> {
+    const userId = (req as any).user?.id as string | undefined;
+    const result = await this.carBookingService.cancelTransfer(id, userId);
+    this.logger.info(
+      `[CarBookingController] Cancelled transfer for car booking ${id}`,
+    );
+    return result;
+  }
+
+  // ============================================================
   // CANCEL (soft delete)
   // ============================================================
 
