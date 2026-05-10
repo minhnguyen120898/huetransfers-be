@@ -301,13 +301,17 @@ export class CarBookingController {
       '- Neither the original nor the compensation booking may have `paymentStatus=completed`\n\n' +
       '**Effect:** Both bookings are soft-cancelled. Debt and profit reports update automatically.',
   })
-  @ApiParam({ name: 'id', description: 'ID of the original (transferred) car booking' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID of the original (transferred) car booking',
+  })
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Both bookings cancelled successfully',
   })
   @ApiBadRequestResponse({
-    description: 'Guard failed — wrong status, past month, or payment already completed',
+    description:
+      'Guard failed — wrong status, past month, or payment already completed',
   })
   @ApiNotFoundResponse({ description: 'Car booking not found' })
   async cancelTransfer(

@@ -489,7 +489,9 @@ describe('CarBookingDebtService', () => {
 
     it('Agency B (partner): compensation booking appears with negative debtAmount', async () => {
       mockPrisma.travelAgency.findUnique.mockResolvedValue(mockAgency2);
-      mockPrisma.carBooking.findMany.mockResolvedValue([mockCompensationBooking]);
+      mockPrisma.carBooking.findMany.mockResolvedValue([
+        mockCompensationBooking,
+      ]);
       mockPrisma.carBooking.aggregate.mockResolvedValue({
         _sum: { debtAmount: null },
       }); // previousMonthDebt = 0

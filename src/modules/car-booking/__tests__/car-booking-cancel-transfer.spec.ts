@@ -29,7 +29,9 @@ const mockPrisma = {
 };
 
 /** Build a CarBookingEntity with sensible defaults — override as needed. */
-function makeEntity(overrides: Partial<CarBookingEntity> = {}): CarBookingEntity {
+function makeEntity(
+  overrides: Partial<CarBookingEntity> = {},
+): CarBookingEntity {
   const entity = new CarBookingEntity();
   entity.id = 'original-id';
   entity.bookingCode = 'CB-20260510-ORIG';
@@ -37,7 +39,9 @@ function makeEntity(overrides: Partial<CarBookingEntity> = {}): CarBookingEntity
   entity.vehicleType = TransportType.seats_4;
   // serviceDate is in the CURRENT month (UTC) so the same-month guard passes by default
   const now = new Date();
-  entity.serviceDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15));
+  entity.serviceDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15),
+  );
   entity.guestName = 'Nguyen Van A';
   entity.guestPhone = '+84-987-000-001';
   entity.guestCount = 2;
@@ -63,7 +67,12 @@ function makeEntity(overrides: Partial<CarBookingEntity> = {}): CarBookingEntity
   entity.updatedAt = new Date();
   entity.createdById = 'user-1';
   entity.updatedById = 'user-1';
-  entity.travelAgency = { id: 'agency-1', name: 'Agency One', tel: null, address: null };
+  entity.travelAgency = {
+    id: 'agency-1',
+    name: 'Agency One',
+    tel: null,
+    address: null,
+  };
   entity.transferToAgency = { id: 'agency-2', name: 'Agency Two', tel: null };
   // Default: one compensation booking linked
   entity.transferBookings = [
@@ -106,11 +115,19 @@ describe('CarBookingService.cancelTransfer()', () => {
     const original = makeEntity();
     mockRepository.findById.mockResolvedValue(original);
 
-    const cancelledOriginal = { ...original, status: CarBookingStatus.cancelled };
+    const cancelledOriginal = {
+      ...original,
+      status: CarBookingStatus.cancelled,
+    };
     const cancelledComp = {
       ...original.transferBookings![0],
       status: CarBookingStatus.cancelled,
-      travelAgency: { id: 'agency-2', name: 'Agency Two', tel: null, address: null },
+      travelAgency: {
+        id: 'agency-2',
+        name: 'Agency Two',
+        tel: null,
+        address: null,
+      },
       transferBookings: [],
       transferToAgency: null,
     };
@@ -118,7 +135,8 @@ describe('CarBookingService.cancelTransfer()', () => {
     mockPrisma.$transaction.mockImplementation(async (fn: any) =>
       fn({
         carBooking: {
-          update: jest.fn()
+          update: jest
+            .fn()
             .mockResolvedValueOnce(cancelledOriginal)
             .mockResolvedValueOnce(cancelledComp),
         },
@@ -137,9 +155,9 @@ describe('CarBookingService.cancelTransfer()', () => {
   it('throws NotFoundException when booking does not exist', async () => {
     mockRepository.findById.mockResolvedValue(null);
 
-    await expect(service.cancelTransfer('no-such-id', 'user-1')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.cancelTransfer('no-such-id', 'user-1'),
+    ).rejects.toThrow(NotFoundException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -149,9 +167,9 @@ describe('CarBookingService.cancelTransfer()', () => {
     const original = makeEntity({ status: CarBookingStatus.confirmed });
     mockRepository.findById.mockResolvedValue(original);
 
-    await expect(service.cancelTransfer('original-id', 'user-1')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.cancelTransfer('original-id', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -159,9 +177,9 @@ describe('CarBookingService.cancelTransfer()', () => {
     const original = makeEntity({ status: CarBookingStatus.cancelled });
     mockRepository.findById.mockResolvedValue(original);
 
-    await expect(service.cancelTransfer('original-id', 'user-1')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.cancelTransfer('original-id', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -174,9 +192,9 @@ describe('CarBookingService.cancelTransfer()', () => {
     const original = makeEntity({ serviceDate: pastDate });
     mockRepository.findById.mockResolvedValue(original);
 
-    await expect(service.cancelTransfer('original-id', 'user-1')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.cancelTransfer('original-id', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -186,9 +204,9 @@ describe('CarBookingService.cancelTransfer()', () => {
     const original = makeEntity({ paymentStatus: PaymentStatus.completed });
     mockRepository.findById.mockResolvedValue(original);
 
-    await expect(service.cancelTransfer('original-id', 'user-1')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.cancelTransfer('original-id', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -198,9 +216,9 @@ describe('CarBookingService.cancelTransfer()', () => {
     const original = makeEntity({ transferBookings: [] });
     mockRepository.findById.mockResolvedValue(original);
 
-    await expect(service.cancelTransfer('original-id', 'user-1')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.cancelTransfer('original-id', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -216,9 +234,9 @@ describe('CarBookingService.cancelTransfer()', () => {
     ];
     mockRepository.findById.mockResolvedValue(original);
 
-    await expect(service.cancelTransfer('original-id', 'user-1')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.cancelTransfer('original-id', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });

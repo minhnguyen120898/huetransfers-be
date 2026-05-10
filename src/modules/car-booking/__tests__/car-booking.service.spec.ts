@@ -429,6 +429,41 @@ describe('CarBookingService', () => {
         }),
       );
     });
+
+    it('sets booking status to completed when paymentStatus is completed', async () => {
+      mockPrisma.carBooking.count.mockResolvedValue(2);
+      mockPrisma.carBooking.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.bulkUpdatePaymentStatus(
+        {
+          bookingIds: ['id-1', 'id-2'],
+          paymentStatus: PaymentStatus.completed,
+        },
+        'user-1',
+      );
+
+      expect(mockPrisma.carBooking.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            paymentStatus: PaymentStatus.completed,
+            status: CarBookingStatus.completed,
+          }),
+        }),
+      );
+    });
+
+    it('does not change booking status when paymentStatus is not completed', async () => {
+      mockPrisma.carBooking.count.mockResolvedValue(1);
+      mockPrisma.carBooking.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.bulkUpdatePaymentStatus(
+        { bookingIds: ['id-1'], paymentStatus: PaymentStatus.pending },
+        'user-1',
+      );
+
+      const callArg = mockPrisma.carBooking.updateMany.mock.calls[0][0];
+      expect(callArg.data).not.toHaveProperty('status');
+    });
   });
 
   // ============================================================

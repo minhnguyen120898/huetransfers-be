@@ -254,11 +254,16 @@ export class CarBookingService {
     const paidAt =
       dto.paymentStatus === PaymentStatus.completed ? new Date() : null;
 
+    const shouldCompleteStatus = dto.paymentStatus === PaymentStatus.completed;
+
     const result = await this.prisma.carBooking.updateMany({
       where: { id: { in: dto.bookingIds } },
       data: {
         paymentStatus: dto.paymentStatus,
         paidAt,
+        ...(shouldCompleteStatus && {
+          status: CarBookingStatus.completed,
+        }),
         updatedById: userId ?? null,
         updatedAt: new Date(),
       },
@@ -542,7 +547,9 @@ export class CarBookingService {
     // Guard 1: booking exists
     const original = await this.carBookingRepository.findById(originalId);
     if (!original) {
-      throw new NotFoundException(`Car booking with ID ${originalId} not found`);
+      throw new NotFoundException(
+        `Car booking with ID ${originalId} not found`,
+      );
     }
 
     // Guard 2: must be in transferred status
@@ -577,7 +584,9 @@ export class CarBookingService {
     }
 
     // Guard 5: compensation booking must exist
-    const compensationBooking = original.transferBookings?.find((b) => b.isTransfer);
+    const compensationBooking = original.transferBookings?.find(
+      (b) => b.isTransfer,
+    );
     if (!compensationBooking) {
       throw new BadRequestException(
         `Cannot cancel transfer for car booking ${original.bookingCode}. ` +
@@ -602,7 +611,9 @@ export class CarBookingService {
           updatedById: userId ?? null,
         },
         include: {
-          travelAgency: { select: { id: true, name: true, tel: true, address: true } },
+          travelAgency: {
+            select: { id: true, name: true, tel: true, address: true },
+          },
           transferBookings: true,
           transferToAgency: { select: { id: true, name: true, tel: true } },
         },
@@ -615,7 +626,9 @@ export class CarBookingService {
           updatedById: userId ?? null,
         },
         include: {
-          travelAgency: { select: { id: true, name: true, tel: true, address: true } },
+          travelAgency: {
+            select: { id: true, name: true, tel: true, address: true },
+          },
           transferBookings: true,
           transferToAgency: { select: { id: true, name: true, tel: true } },
         },
