@@ -19,7 +19,18 @@ export interface CarTransferFinancials {
   totalOriginalSellingPrice: Decimal;
   totalCompensationAmount: Decimal;
   netTransferCost: Decimal;
-  transfers: CarTransferDetail[];
+  // transfers array removed — use GET /profit/car-transfers for detail rows
+}
+
+export interface PaginatedCarTransfersMeta {
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface PaginatedCarTransfers {
+  data: CarTransferDetail[];
+  meta: PaginatedCarTransfersMeta;
 }
 
 export interface CarBookingFinancials {
