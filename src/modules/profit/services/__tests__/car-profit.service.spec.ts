@@ -9,6 +9,7 @@ const mockPrisma = {
   carBooking: {
     aggregate: jest.fn(),
     findMany: jest.fn(),
+    count: jest.fn(),
   },
 };
 
@@ -54,11 +55,8 @@ describe('CarProfitService', () => {
       // Transfer bookings: 1 transfer
       mockPrisma.carBooking.findMany.mockResolvedValueOnce([
         {
-          bookingCode: 'CAR-20260401-0001-TRANSFER',
           sellingPrice: new Decimal('5500000'), // compensationAmount
-          travelAgency: { name: 'STours' },
           transferFrom: {
-            bookingCode: 'CAR-20260401-0001',
             sellingPrice: new Decimal('5000000'), // originalSellingPrice
           },
         },
@@ -103,10 +101,8 @@ describe('CarProfitService', () => {
         '500000',
       );
       expect(result.transferFinancials.transferCount).toBe(1);
-      expect(result.transferFinancials.transfers).toHaveLength(1);
-      expect(result.transferFinancials.transfers[0].partnerAgencyName).toBe(
-        'STours',
-      );
+      // transfers array no longer exists on transferFinancials
+      expect((result.transferFinancials as any).transfers).toBeUndefined();
     });
 
     it('calculates revenue after transfer deductions', async () => {
@@ -175,6 +171,99 @@ describe('CarProfitService', () => {
       const result = await service.getCarMonthlyProfitSummary(year, month);
       expect(result.bookingFinancials.grossRevenue.toString()).toBe('0');
       expect(result.totalProfit.toString()).toBe('0');
+    });
+  });
+
+  describe('getCarTransfers', () => {
+    const year = 2026;
+    const month = 5;
+
+    const mockTransferRows = [
+      {
+        bookingCode: 'CB-20260501-TRANSFER',
+        sellingPrice: new Decimal('5500000'),
+        travelAgency: { name: 'STours' },
+        transferFrom: {
+          bookingCode: 'CB-20260501-ORIG',
+          sellingPrice: new Decimal('5000000'),
+        },
+      },
+      {
+        bookingCode: 'CB-20260502-TRANSFER',
+        sellingPrice: new Decimal('3300000'),
+        travelAgency: { name: 'BTours' },
+        transferFrom: {
+          bookingCode: 'CB-20260502-ORIG',
+          sellingPrice: new Decimal('3000000'),
+        },
+      },
+    ];
+
+    it('returns paginated transfers with correct meta', async () => {
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([mockTransferRows[0]]);
+      mockPrisma.carBooking.count.mockResolvedValueOnce(2);
+
+      const result = await service.getCarTransfers(year, month, 1, 1);
+
+      expect(result.data).toHaveLength(1);
+      expect(result.meta.total).toBe(2);
+      expect(result.meta.page).toBe(1);
+      expect(result.meta.limit).toBe(1);
+    });
+
+    it('maps transfer row fields correctly', async () => {
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([mockTransferRows[0]]);
+      mockPrisma.carBooking.count.mockResolvedValueOnce(1);
+
+      const result = await service.getCarTransfers(year, month, 1, 10);
+      const item = result.data[0];
+
+      expect(item.originalBookingCode).toBe('CB-20260501-ORIG');
+      expect(item.transferBookingCode).toBe('CB-20260501-TRANSFER');
+      expect(item.partnerAgencyName).toBe('STours');
+      expect(item.originalSellingPrice.toString()).toBe('5000000');
+      expect(item.compensationAmount.toString()).toBe('5500000');
+      expect(item.netCost.toString()).toBe('500000');
+    });
+
+    it('returns empty data for a month with no transfers', async () => {
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([]);
+      mockPrisma.carBooking.count.mockResolvedValueOnce(0);
+
+      const result = await service.getCarTransfers(year, month, 1, 10);
+
+      expect(result.data).toHaveLength(0);
+      expect(result.meta.total).toBe(0);
+    });
+
+    it('calculates correct skip for page 2', async () => {
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([mockTransferRows[1]]);
+      mockPrisma.carBooking.count.mockResolvedValueOnce(2);
+
+      await service.getCarTransfers(year, month, 2, 1);
+
+      expect(mockPrisma.carBooking.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 1, take: 1 }),
+      );
+    });
+
+    it('handles missing transferFrom gracefully', async () => {
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([
+        {
+          bookingCode: 'CB-20260503-TRANSFER',
+          sellingPrice: new Decimal('4000000'),
+          travelAgency: null,
+          transferFrom: null,
+        },
+      ]);
+      mockPrisma.carBooking.count.mockResolvedValueOnce(1);
+
+      const result = await service.getCarTransfers(year, month, 1, 10);
+      const item = result.data[0];
+
+      expect(item.originalBookingCode).toBe('');
+      expect(item.partnerAgencyName).toBe('');
+      expect(item.originalSellingPrice.toString()).toBe('0');
     });
   });
 });
