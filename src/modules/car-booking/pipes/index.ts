@@ -6,3 +6,4 @@ export { CreateCarTransferBookingPipe } from './create-car-transfer-booking.pipe
 export { UpdateCarTransferPricingPipe } from './update-car-transfer-pricing.pipe';
 export { BulkCarPaymentStatusPipe } from './bulk-car-payment-status.pipe';
 export { CarBookingSummaryQueryPipe } from './car-booking-summary-query.pipe';
+export { UpdateCarOriginalPricingPipe } from './update-car-original-pricing.pipe';

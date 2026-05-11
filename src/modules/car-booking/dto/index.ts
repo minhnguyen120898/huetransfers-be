@@ -8,3 +8,4 @@ export { UpdateCarTransferPricingDto } from './update-car-transfer-pricing.dto';
 export { BulkCarPaymentStatusDto } from './bulk-car-payment-status.dto';
 export { CarBookingSummaryQueryDto } from './car-booking-summary-query.dto';
 export { CarBookingSummaryResponseDto } from './car-booking-summary-response.dto';
+export { UpdateCarOriginalPricingDto } from './update-car-original-pricing.dto';
