@@ -200,7 +200,9 @@ describe('CarProfitService', () => {
     ];
 
     it('returns paginated transfers with correct meta', async () => {
-      mockPrisma.carBooking.findMany.mockResolvedValueOnce([mockTransferRows[0]]);
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([
+        mockTransferRows[0],
+      ]);
       mockPrisma.carBooking.count.mockResolvedValueOnce(2);
 
       const result = await service.getCarTransfers(year, month, 1, 1);
@@ -212,7 +214,9 @@ describe('CarProfitService', () => {
     });
 
     it('maps transfer row fields correctly', async () => {
-      mockPrisma.carBooking.findMany.mockResolvedValueOnce([mockTransferRows[0]]);
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([
+        mockTransferRows[0],
+      ]);
       mockPrisma.carBooking.count.mockResolvedValueOnce(1);
 
       const result = await service.getCarTransfers(year, month, 1, 10);
@@ -237,7 +241,9 @@ describe('CarProfitService', () => {
     });
 
     it('calculates correct skip for page 2', async () => {
-      mockPrisma.carBooking.findMany.mockResolvedValueOnce([mockTransferRows[1]]);
+      mockPrisma.carBooking.findMany.mockResolvedValueOnce([
+        mockTransferRows[1],
+      ]);
       mockPrisma.carBooking.count.mockResolvedValueOnce(2);
 
       await service.getCarTransfers(year, month, 2, 1);
