@@ -8,29 +8,6 @@ class CarProfitPeriodDto {
   endDate: Date;
 }
 
-class CarTransferDetailDto {
-  @ApiProperty({ example: 'CAR-20260401-0001' })
-  originalBookingCode: string;
-
-  @ApiProperty({ example: 'CAR-20260401-0001-TRANSFER' })
-  transferBookingCode: string;
-
-  @ApiProperty({ example: 'STours' })
-  partnerAgencyName: string;
-
-  @ApiProperty({ example: '5000000' })
-  originalSellingPrice: string;
-
-  @ApiProperty({ example: '5500000' })
-  compensationAmount: string;
-
-  @ApiProperty({
-    description: 'compensationAmount - originalSellingPrice',
-    example: '500000',
-  })
-  netCost: string;
-}
-
 class CarTransferFinancialsDto {
   @ApiProperty({ example: 2 })
   transferCount: number;
@@ -46,9 +23,6 @@ class CarTransferFinancialsDto {
     example: '1000000',
   })
   netTransferCost: string;
-
-  @ApiProperty({ type: [CarTransferDetailDto] })
-  transfers: CarTransferDetailDto[];
 }
 
 class CarBookingFinancialsDto {
