@@ -34,6 +34,7 @@ import {
   CarBookingCountQueryDto,
   CreateCarTransferBookingDto,
   UpdateCarTransferPricingDto,
+  UpdateCarOriginalPricingDto,
   BulkCarPaymentStatusDto,
   CarBookingSummaryQueryDto,
   CarBookingSummaryResponseDto,
@@ -45,6 +46,7 @@ import {
   CarBookingCountQueryPipe,
   CreateCarTransferBookingPipe,
   UpdateCarTransferPricingPipe,
+  UpdateCarOriginalPricingPipe,
   BulkCarPaymentStatusPipe,
   CarBookingSummaryQueryPipe,
 } from '../pipes';
@@ -446,5 +448,54 @@ export class CarBookingController {
   }> {
     const userId = req.user?.id;
     return this.carBookingService.updateTransferPricing(id, dto, userId);
+  }
+
+  @Patch(':id/original-pricing')
+  @ApiOperation({
+    summary: 'Update original booking pricing after transfer',
+    description:
+      'Edit sellingPrice and receivingPrice on a transferred car booking. ' +
+      'debtAmount is recalculated server-side as sellingPrice - receivingPrice. ' +
+      'The linked transfer (compensation) booking is NOT affected.\n\n' +
+      '**Guards:**\n' +
+      '- Booking must have status `transferred`\n' +
+      '- Service date must be in the current calendar month\n' +
+      '- Original booking `paymentStatus` must not be `completed`',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID of the original (transferred) car booking',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Original booking pricing updated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        originalBooking: { $ref: '#/components/schemas/CarBookingResponseDto' },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Guard failed — wrong status, past month, or payment already completed',
+  })
+  @ApiNotFoundResponse({ description: 'Car booking not found' })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error' })
+  async updateOriginalPricing(
+    @Param('id') id: string,
+    @Body(UpdateCarOriginalPricingPipe) dto: UpdateCarOriginalPricingDto,
+    @Req() req: FastifyRequest,
+  ): Promise<{ originalBooking: CarBookingResponseDto }> {
+    const userId = req.user?.id;
+    const result = await this.carBookingService.updateOriginalPricing(
+      id,
+      dto,
+      userId,
+    );
+    this.logger.info(
+      `[CarBookingController] PATCH /car-bookings/${id}/original-pricing → updated pricing`,
+    );
+    return result;
   }
 }

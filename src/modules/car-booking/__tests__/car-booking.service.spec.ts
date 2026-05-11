@@ -30,7 +30,7 @@ const mockRepository = {
 
 const mockPrisma = {
   travelAgency: { findUnique: jest.fn() },
-  carBooking: { count: jest.fn(), updateMany: jest.fn(), aggregate: jest.fn() },
+  carBooking: { count: jest.fn(), updateMany: jest.fn(), aggregate: jest.fn(), update: jest.fn() },
   $transaction: jest.fn(),
 };
 
