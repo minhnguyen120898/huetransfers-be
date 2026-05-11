@@ -21,6 +21,7 @@ import {
   CarBookingCountQueryDto,
   CreateCarTransferBookingDto,
   UpdateCarTransferPricingDto,
+  UpdateCarOriginalPricingDto,
   BulkCarPaymentStatusDto,
 } from '../dto';
 import { CarBookingStatus, PaymentStatus } from 'generated/prisma';
@@ -526,6 +527,106 @@ export class CarBookingService {
       transferBooking: this.mapToResponseDto(
         this.mapPrismaToEntity(result.updatedTransfer),
       ),
+    };
+  }
+
+  // ============================================================
+  // UPDATE ORIGINAL PRICING (post-transfer)
+  // ============================================================
+
+  /**
+   * Edit sellingPrice / receivingPrice on a transferred booking.
+   * debtAmount is recalculated as sellingPrice - receivingPrice.
+   * Transfer booking (compensation) is NOT affected.
+   *
+   * Guards:
+   *   1. Booking must exist
+   *   2. Status must be "transferred"
+   *   3. serviceDate must be in the current UTC month
+   *   4. paymentStatus must not be "completed"
+   */
+  async updateOriginalPricing(
+    originalId: string,
+    dto: UpdateCarOriginalPricingDto,
+    userId?: string,
+  ): Promise<{ originalBooking: CarBookingResponseDto }> {
+    const original = await this.carBookingRepository.findById(originalId);
+    if (!original) {
+      throw new NotFoundException(
+        `Car booking with ID ${originalId} not found`,
+      );
+    }
+
+    if (!original.isTransferred()) {
+      throw new BadRequestException(
+        `Car booking ${originalId} has not been transferred (status: ${original.status}). ` +
+          'Only transferred bookings can have their original pricing updated.',
+      );
+    }
+
+    const now = new Date();
+    const currentMonth = now.getUTCMonth();
+    const currentYear = now.getUTCFullYear();
+    const serviceMonth = original.serviceDate.getUTCMonth();
+    const serviceYear = original.serviceDate.getUTCFullYear();
+
+    if (serviceYear !== currentYear || serviceMonth !== currentMonth) {
+      throw new BadRequestException(
+        `Cannot update pricing for car booking ${original.bookingCode}. ` +
+          `Pricing updates are only allowed in the same month as the service date ` +
+          `(${original.serviceDate.toISOString().slice(0, 7)}).`,
+      );
+    }
+
+    if (original.paymentStatus === PaymentStatus.completed) {
+      throw new BadRequestException(
+        `Cannot update pricing for car booking ${original.bookingCode}. ` +
+          `Payment is already completed.`,
+      );
+    }
+
+    const newSellingPrice = new Decimal(dto.sellingPrice);
+    const newReceivingPrice = new Decimal(dto.receivingPrice);
+    const newDebtAmount = newSellingPrice.minus(newReceivingPrice);
+
+    const pricingNote =
+      `\n\n[PRICING UPDATE - ${new Date().toLocaleString('vi-VN')}]\n` +
+      `Previous sellingPrice: ${original.sellingPrice.toString()} VND\n` +
+      `Previous receivingPrice: ${original.receivingPrice.toString()} VND\n` +
+      `New sellingPrice: ${newSellingPrice.toString()} VND\n` +
+      `New receivingPrice: ${newReceivingPrice.toString()} VND\n` +
+      `New debtAmount: ${newDebtAmount.toString()} VND\n` +
+      (dto.reason ? `Reason: ${dto.reason}\n` : '');
+
+    const updatedNote = original.note
+      ? `${original.note}${pricingNote}`
+      : pricingNote;
+
+    const updatedData = await this.prisma.carBooking.update({
+      where: { id: originalId },
+      data: {
+        sellingPrice: newSellingPrice,
+        receivingPrice: newReceivingPrice,
+        debtAmount: newDebtAmount,
+        note: updatedNote,
+        updatedById: userId ?? null,
+      },
+      include: {
+        travelAgency: {
+          select: { id: true, name: true, tel: true, address: true },
+        },
+        transferBookings: true,
+        transferToAgency: true,
+      },
+    });
+
+    this.logger.info(
+      `[CarBookingService] Updated original pricing for ${original.bookingCode}: ` +
+        `sellingPrice=${newSellingPrice.toString()}, receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newDebtAmount.toString()}`,
+    );
+
+    return {
+      originalBooking: this.mapToResponseDto(this.mapPrismaToEntity(updatedData)),
     };
   }
 
