@@ -9,9 +9,10 @@ export class UpdateCarOriginalPricingDto {
   sellingPrice: number;
 
   @ApiProperty({
-    description: 'New receiving price in VND (what the agency pays us)',
+    description:
+      'New receiving price in VND (what the agency pays us). Use 0 for no_collection bookings.',
     example: 1800000,
-    minimum: 1,
+    minimum: 0,
   })
   receivingPrice: number;
 

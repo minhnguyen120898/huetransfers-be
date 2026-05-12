@@ -460,7 +460,9 @@ export class CarBookingService {
       );
     }
 
-    const transferBookingData = original.transferBookings?.[0];
+    const transferBookingData = original.transferBookings?.find(
+      (b) => b.isTransfer,
+    );
     if (!transferBookingData) {
       throw new NotFoundException(
         `No transfer booking found for car booking ${originalId}`,
@@ -536,8 +538,9 @@ export class CarBookingService {
 
   /**
    * Edit sellingPrice / receivingPrice on a transferred booking.
-   * debtAmount is recalculated as sellingPrice - receivingPrice.
-   * Transfer booking (compensation) is NOT affected.
+   * Original debtAmount = sellingPrice - receivingPrice.
+   * Transfer booking receivingPrice is synced and its debtAmount recalculated
+   * as -(compensationAmount - newReceivingPrice) in the same transaction.
    *
    * Guards:
    *   1. Booking must exist
@@ -549,7 +552,10 @@ export class CarBookingService {
     originalId: string,
     dto: UpdateCarOriginalPricingDto,
     userId?: string,
-  ): Promise<{ originalBooking: CarBookingResponseDto }> {
+  ): Promise<{
+    originalBooking: CarBookingResponseDto;
+    transferBooking: CarBookingResponseDto;
+  }> {
     const original = await this.carBookingRepository.findById(originalId);
     if (!original) {
       throw new NotFoundException(
@@ -585,9 +591,33 @@ export class CarBookingService {
       );
     }
 
+    const transferBookingData = original.transferBookings?.find(
+      (b) => b.isTransfer,
+    );
+    if (!transferBookingData) {
+      throw new NotFoundException(
+        `No transfer booking found for car booking ${originalId}`,
+      );
+    }
+
+    if (transferBookingData.paymentStatus === PaymentStatus.completed) {
+      throw new BadRequestException(
+        `Cannot update pricing for car booking ${original.bookingCode}. ` +
+          `The linked compensation booking payment is already completed.`,
+      );
+    }
+
     const newSellingPrice = new Decimal(dto.sellingPrice);
     const newReceivingPrice = new Decimal(dto.receivingPrice);
     const newDebtAmount = newSellingPrice.minus(newReceivingPrice);
+
+    // Transfer booking: keep compensation (sellingPrice), sync receivingPrice, recalculate debtAmount
+    const transferCompensationAmount = new Decimal(
+      transferBookingData.sellingPrice,
+    );
+    const newTransferDebtAmount = new Decimal(0).minus(
+      transferCompensationAmount.minus(newReceivingPrice),
+    );
 
     const pricingNote =
       `\n\n[PRICING UPDATE - ${new Date().toLocaleString('vi-VN')}]\n` +
@@ -602,31 +632,57 @@ export class CarBookingService {
       ? `${original.note}${pricingNote}`
       : pricingNote;
 
-    const updatedData = await this.prisma.carBooking.update({
-      where: { id: originalId },
-      data: {
-        sellingPrice: newSellingPrice,
-        receivingPrice: newReceivingPrice,
-        debtAmount: newDebtAmount,
-        note: updatedNote,
-        updatedById: userId ?? null,
-      },
-      include: {
-        travelAgency: {
-          select: { id: true, name: true, tel: true, address: true },
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedOriginal = await tx.carBooking.update({
+        where: { id: originalId },
+        data: {
+          sellingPrice: newSellingPrice,
+          receivingPrice: newReceivingPrice,
+          debtAmount: newDebtAmount,
+          note: updatedNote,
+          updatedById: userId ?? null,
         },
-        transferBookings: true,
-        transferToAgency: true,
-      },
+        include: {
+          travelAgency: {
+            select: { id: true, name: true, tel: true, address: true },
+          },
+          transferBookings: true,
+          transferToAgency: true,
+        },
+      });
+
+      const updatedTransfer = await tx.carBooking.update({
+        where: { id: transferBookingData.id },
+        data: {
+          receivingPrice: newReceivingPrice,
+          debtAmount: newTransferDebtAmount,
+          updatedById: userId ?? null,
+        },
+        include: {
+          travelAgency: {
+            select: { id: true, name: true, tel: true, address: true },
+          },
+          transferBookings: true,
+          transferToAgency: true,
+        },
+      });
+
+      return { updatedOriginal, updatedTransfer };
     });
 
     this.logger.info(
       `[CarBookingService] Updated original pricing for ${original.bookingCode}: ` +
-        `sellingPrice=${newSellingPrice.toString()}, receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newDebtAmount.toString()}`,
+        `sellingPrice=${newSellingPrice.toString()}, receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newDebtAmount.toString()} | ` +
+        `Transfer booking synced: receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newTransferDebtAmount.toString()}`,
     );
 
     return {
-      originalBooking: this.mapToResponseDto(this.mapPrismaToEntity(updatedData)),
+      originalBooking: this.mapToResponseDto(
+        this.mapPrismaToEntity(result.updatedOriginal),
+      ),
+      transferBooking: this.mapToResponseDto(
+        this.mapPrismaToEntity(result.updatedTransfer),
+      ),
     };
   }
 

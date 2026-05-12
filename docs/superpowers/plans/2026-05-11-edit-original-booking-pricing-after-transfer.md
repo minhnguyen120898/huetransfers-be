@@ -4,7 +4,7 @@
 
 **Goal:** Add `PATCH /car-bookings/:id/original-pricing` so operators can edit `sellingPrice` and `receivingPrice` on a transferred car booking, with `debtAmount` recalculated server-side.
 
-**Architecture:** New DTO + Joi pipe → new service method `updateOriginalPricing()` with four guards (transferred status, same-month, payment not completed, booking exists) → single `prisma.carBooking.update()` on the original booking only. Transfer booking is never touched. Pattern mirrors the existing `updateTransferPricing` flow exactly.
+**Architecture:** New DTO + Joi pipe → new service method `updateOriginalPricing()` with four guards (transferred status, same-month, payment not completed, booking exists) → `prisma.$transaction` updating both the original booking and its linked transfer booking. Transfer booking `receivingPrice` is synced to the new value; transfer booking `debtAmount` is recalculated as `-(compensationAmount - newReceivingPrice)`. Pattern mirrors the existing `updateTransferPricing` flow.
 
 **Tech Stack:** NestJS, Prisma, Joi validation, Jest
 
@@ -236,7 +236,7 @@ describe('updateOriginalPricing', () => {
     const original = makeTransferredEntity();
     mockRepository.findById.mockResolvedValue(original);
 
-    const updatedRecord = {
+    const updatedOriginalRecord = {
       ...original,
       sellingPrice: new Decimal(2500000),
       receivingPrice: new Decimal(1800000),
@@ -245,7 +245,24 @@ describe('updateOriginalPricing', () => {
       transferBookings: [],
       transferToAgency: null,
     };
-    mockPrisma.carBooking.update = jest.fn().mockResolvedValue(updatedRecord);
+    const updatedTransferRecord = {
+      ...original,
+      id: 'transfer-booking-uuid-1',
+      receivingPrice: new Decimal(1800000),
+      debtAmount: new Decimal(-200000), // -(2000000 - 1800000)
+      travelAgency: original.travelAgency,
+      transferBookings: [],
+      transferToAgency: null,
+    };
+    mockPrisma.$transaction = jest.fn().mockImplementation(async (fn) =>
+      fn({
+        carBooking: {
+          update: jest.fn()
+            .mockResolvedValueOnce(updatedOriginalRecord)
+            .mockResolvedValueOnce(updatedTransferRecord),
+        },
+      }),
+    );
 
     const result = await service.updateOriginalPricing(
       'car-booking-uuid-1',
@@ -253,21 +270,46 @@ describe('updateOriginalPricing', () => {
       'user-1',
     );
 
-    expect(mockPrisma.carBooking.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'car-booking-uuid-1' },
-        data: expect.objectContaining({
-          sellingPrice: expect.any(Object), // Decimal
-          receivingPrice: expect.any(Object), // Decimal
-          debtAmount: expect.any(Object), // Decimal
-          updatedById: 'user-1',
-        }),
-      }),
-    );
-
     expect(result.originalBooking.sellingPrice).toBe(2500000);
     expect(result.originalBooking.receivingPrice).toBe(1800000);
     expect(result.originalBooking.debtAmount).toBe(700000);
+    expect(result.transferBooking.receivingPrice).toBe(1800000);
+  });
+
+  it('syncs transfer booking receivingPrice and recalculates its debtAmount', async () => {
+    // Original: sellingPrice=2M, receivingPrice=1.5M, debtAmount=500K
+    // Transfer booking: sellingPrice(compensation)=2M, receivingPrice=1.5M, debtAmount=-500K
+    // After update: receivingPrice=1.8M
+    //   Original debtAmount = 2M - 1.8M = 200K
+    //   Transfer debtAmount = -(2M - 1.8M) = -200K
+    const original = makeTransferredEntity();
+    mockRepository.findById.mockResolvedValue(original);
+
+    let capturedTransferData: any;
+    mockPrisma.$transaction = jest.fn().mockImplementation(async (fn) => {
+      const txMock = {
+        carBooking: {
+          update: jest.fn()
+            .mockImplementationOnce(async (args) => ({ ...original, ...args.data, transferBookings: [], travelAgency: null, transferToAgency: null }))
+            .mockImplementationOnce(async (args) => {
+              capturedTransferData = args.data;
+              return { ...original, id: 'transfer-uuid', ...args.data, transferBookings: [], travelAgency: null, transferToAgency: null };
+            }),
+        },
+      };
+      return fn(txMock);
+    });
+
+    await service.updateOriginalPricing(
+      'car-booking-uuid-1',
+      { sellingPrice: 2000000, receivingPrice: 1800000 },
+      'user-1',
+    );
+
+    // Transfer booking receivingPrice must equal new value
+    expect(capturedTransferData.receivingPrice.toString()).toBe('1800000');
+    // Transfer debtAmount = -(compensationAmount - newReceivingPrice) = -(2000000 - 1800000) = -200000
+    expect(capturedTransferData.debtAmount.toString()).toBe('-200000');
   });
 
   it('appends audit note when original note is null', async () => {
@@ -357,7 +399,7 @@ Then add the method after `updateTransferPricing` (before the `cancelTransfer` s
 /**
  * Edit sellingPrice / receivingPrice on a transferred booking.
  * debtAmount is recalculated as sellingPrice - receivingPrice.
- * Transfer booking (compensation) is NOT affected.
+ * Transfer booking receivingPrice and debtAmount are synced in the same transaction.
  *
  * Guards:
  *   1. Booking must exist
@@ -369,7 +411,7 @@ async updateOriginalPricing(
   originalId: string,
   dto: UpdateCarOriginalPricingDto,
   userId?: string,
-): Promise<{ originalBooking: CarBookingResponseDto }> {
+): Promise<{ originalBooking: CarBookingResponseDto; transferBooking: CarBookingResponseDto }> {
   const original = await this.carBookingRepository.findById(originalId);
   if (!original) {
     throw new NotFoundException(
@@ -405,9 +447,22 @@ async updateOriginalPricing(
     );
   }
 
+  const transferBookingData = original.transferBookings?.[0];
+  if (!transferBookingData) {
+    throw new NotFoundException(
+      `No transfer booking found for car booking ${originalId}`,
+    );
+  }
+
   const newSellingPrice = new Decimal(dto.sellingPrice);
   const newReceivingPrice = new Decimal(dto.receivingPrice);
   const newDebtAmount = newSellingPrice.minus(newReceivingPrice);
+
+  // Transfer booking: keep its sellingPrice (compensation), sync receivingPrice, recalculate debtAmount
+  const transferCompensationAmount = new Decimal(transferBookingData.sellingPrice);
+  const newTransferDebtAmount = new Decimal(0).minus(
+    transferCompensationAmount.minus(newReceivingPrice),
+  );
 
   const pricingNote =
     `\n\n[PRICING UPDATE - ${new Date().toLocaleString('vi-VN')}]\n` +
@@ -422,31 +477,53 @@ async updateOriginalPricing(
     ? `${original.note}${pricingNote}`
     : pricingNote;
 
-  const updatedData = await this.prisma.carBooking.update({
-    where: { id: originalId },
-    data: {
-      sellingPrice: newSellingPrice,
-      receivingPrice: newReceivingPrice,
-      debtAmount: newDebtAmount,
-      note: updatedNote,
-      updatedById: userId ?? null,
-    },
-    include: {
-      travelAgency: {
-        select: { id: true, name: true, tel: true, address: true },
+  const result = await this.prisma.$transaction(async (tx) => {
+    const updatedOriginal = await tx.carBooking.update({
+      where: { id: originalId },
+      data: {
+        sellingPrice: newSellingPrice,
+        receivingPrice: newReceivingPrice,
+        debtAmount: newDebtAmount,
+        note: updatedNote,
+        updatedById: userId ?? null,
       },
-      transferBookings: true,
-      transferToAgency: true,
-    },
+      include: {
+        travelAgency: {
+          select: { id: true, name: true, tel: true, address: true },
+        },
+        transferBookings: true,
+        transferToAgency: true,
+      },
+    });
+
+    const updatedTransfer = await tx.carBooking.update({
+      where: { id: transferBookingData.id },
+      data: {
+        receivingPrice: newReceivingPrice,
+        debtAmount: newTransferDebtAmount,
+        updatedById: userId ?? null,
+      },
+      include: {
+        travelAgency: {
+          select: { id: true, name: true, tel: true, address: true },
+        },
+        transferBookings: true,
+        transferToAgency: true,
+      },
+    });
+
+    return { updatedOriginal, updatedTransfer };
   });
 
   this.logger.info(
     `[CarBookingService] Updated original pricing for ${original.bookingCode}: ` +
-      `sellingPrice=${newSellingPrice.toString()}, receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newDebtAmount.toString()}`,
+      `sellingPrice=${newSellingPrice.toString()}, receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newDebtAmount.toString()} | ` +
+      `Transfer booking synced: receivingPrice=${newReceivingPrice.toString()}, debtAmount=${newTransferDebtAmount.toString()}`,
   );
 
   return {
-    originalBooking: this.mapToResponseDto(this.mapPrismaToEntity(updatedData)),
+    originalBooking: this.mapToResponseDto(this.mapPrismaToEntity(result.updatedOriginal)),
+    transferBooking: this.mapToResponseDto(this.mapPrismaToEntity(result.updatedTransfer)),
   };
 }
 ```

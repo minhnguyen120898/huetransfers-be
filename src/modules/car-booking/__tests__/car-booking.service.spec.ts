@@ -30,7 +30,12 @@ const mockRepository = {
 
 const mockPrisma = {
   travelAgency: { findUnique: jest.fn() },
-  carBooking: { count: jest.fn(), updateMany: jest.fn(), aggregate: jest.fn(), update: jest.fn() },
+  carBooking: {
+    count: jest.fn(),
+    updateMany: jest.fn(),
+    aggregate: jest.fn(),
+    update: jest.fn(),
+  },
   $transaction: jest.fn(),
 };
 
@@ -607,6 +612,15 @@ describe('CarBookingService', () => {
       Date.UTC(THIS_MONTH.getUTCFullYear(), THIS_MONTH.getUTCMonth() - 1, 15),
     );
 
+    const transferBookingStub = {
+      id: 'transfer-booking-uuid-1',
+      sellingPrice: new Decimal(2000000), // compensation amount
+      receivingPrice: new Decimal(1500000),
+      debtAmount: new Decimal(-500000),
+      isTransfer: true,
+      paymentStatus: PaymentStatus.pending,
+    };
+
     function makeTransferredEntity(
       overrides: Partial<CarBookingEntity> = {},
     ): CarBookingEntity {
@@ -617,8 +631,24 @@ describe('CarBookingService', () => {
         sellingPrice: new Decimal(2000000),
         receivingPrice: new Decimal(1500000),
         debtAmount: new Decimal(500000),
+        transferBookings: [transferBookingStub as any],
         ...overrides,
       });
+    }
+
+    function makeTxMock(originalResult: object, transferResult: object) {
+      return jest
+        .fn()
+        .mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+          fn({
+            carBooking: {
+              update: jest
+                .fn()
+                .mockResolvedValueOnce(originalResult)
+                .mockResolvedValueOnce(transferResult),
+            },
+          }),
+        );
     }
 
     beforeEach(() => {
@@ -683,7 +713,7 @@ describe('CarBookingService', () => {
       const original = makeTransferredEntity();
       mockRepository.findById.mockResolvedValue(original);
 
-      const updatedRecord = {
+      const updatedOriginalRecord = {
         ...original,
         sellingPrice: new Decimal(2500000),
         receivingPrice: new Decimal(1800000),
@@ -692,46 +722,119 @@ describe('CarBookingService', () => {
         transferBookings: [],
         transferToAgency: null,
       };
-      mockPrisma.carBooking.update = jest.fn().mockResolvedValue(updatedRecord);
+      const updatedTransferRecord = {
+        ...transferBookingStub,
+        receivingPrice: new Decimal(1800000),
+        debtAmount: new Decimal(-200000), // -(2000000 - 1800000)
+        travelAgency: null,
+        transferBookings: [],
+        transferToAgency: null,
+      };
+      mockPrisma.$transaction = makeTxMock(
+        updatedOriginalRecord,
+        updatedTransferRecord,
+      );
 
       const result = await service.updateOriginalPricing(
         'car-booking-uuid-1',
-        { sellingPrice: 2500000, receivingPrice: 1800000, reason: 'Renegotiated' },
+        {
+          sellingPrice: 2500000,
+          receivingPrice: 1800000,
+          reason: 'Renegotiated',
+        },
         'user-1',
-      );
-
-      expect(mockPrisma.carBooking.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'car-booking-uuid-1' },
-          data: expect.objectContaining({
-            sellingPrice: expect.any(Object), // Decimal
-            receivingPrice: expect.any(Object), // Decimal
-            debtAmount: expect.any(Object), // Decimal
-            updatedById: 'user-1',
-          }),
-        }),
       );
 
       expect(result.originalBooking.sellingPrice).toBe(2500000);
       expect(result.originalBooking.receivingPrice).toBe(1800000);
       expect(result.originalBooking.debtAmount).toBe(700000);
+      expect(result.transferBooking.receivingPrice).toBe(1800000);
+    });
+
+    it('syncs transfer booking receivingPrice and recalculates its debtAmount', async () => {
+      const original = makeTransferredEntity();
+      mockRepository.findById.mockResolvedValue(original);
+
+      let capturedOriginalData: any;
+      let capturedTransferData: any;
+
+      mockPrisma.$transaction = jest
+        .fn()
+        .mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+          fn({
+            carBooking: {
+              update: jest
+                .fn()
+                .mockImplementationOnce(async (args: any) => {
+                  capturedOriginalData = args.data;
+                  return {
+                    ...original,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                })
+                .mockImplementationOnce(async (args: any) => {
+                  capturedTransferData = args.data;
+                  return {
+                    ...transferBookingStub,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                }),
+            },
+          }),
+        );
+
+      await service.updateOriginalPricing(
+        'car-booking-uuid-1',
+        { sellingPrice: 2000000, receivingPrice: 1800000 },
+        'user-1',
+      );
+
+      // Original debtAmount = 2000000 - 1800000 = 200000
+      expect(capturedOriginalData.debtAmount.toString()).toBe('200000');
+      // Transfer receivingPrice must equal new value
+      expect(capturedTransferData.receivingPrice.toString()).toBe('1800000');
+      // Transfer debtAmount = -(compensationAmount - newReceivingPrice) = -(2000000 - 1800000) = -200000
+      expect(capturedTransferData.debtAmount.toString()).toBe('-200000');
     });
 
     it('appends audit note when original note is null', async () => {
       const original = makeTransferredEntity({ note: null });
       mockRepository.findById.mockResolvedValue(original);
 
-      const updatedRecord = {
-        ...original,
-        sellingPrice: new Decimal(2500000),
-        receivingPrice: new Decimal(1800000),
-        debtAmount: new Decimal(700000),
-        note: '[PRICING UPDATE',
-        travelAgency: original.travelAgency,
-        transferBookings: [],
-        transferToAgency: null,
-      };
-      mockPrisma.carBooking.update = jest.fn().mockResolvedValue(updatedRecord);
+      let capturedOriginalData: any;
+
+      mockPrisma.$transaction = jest
+        .fn()
+        .mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+          fn({
+            carBooking: {
+              update: jest
+                .fn()
+                .mockImplementationOnce(async (args: any) => {
+                  capturedOriginalData = args.data;
+                  return {
+                    ...original,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                })
+                .mockResolvedValueOnce({
+                  ...transferBookingStub,
+                  transferBookings: [],
+                  travelAgency: null,
+                  transferToAgency: null,
+                }),
+            },
+          }),
+        );
 
       await service.updateOriginalPricing(
         'car-booking-uuid-1',
@@ -739,27 +842,43 @@ describe('CarBookingService', () => {
         'user-1',
       );
 
-      const updateCall = (mockPrisma.carBooking.update as jest.Mock).mock.calls[0][0];
-      expect(updateCall.data.note).toContain('[PRICING UPDATE');
-      expect(updateCall.data.note).toContain('2000000'); // previous sellingPrice
-      expect(updateCall.data.note).toContain('2500000'); // new sellingPrice
+      expect(capturedOriginalData.note).toContain('[PRICING UPDATE');
+      expect(capturedOriginalData.note).toContain('2000000'); // previous sellingPrice
+      expect(capturedOriginalData.note).toContain('2500000'); // new sellingPrice
     });
 
     it('appends audit note to existing note', async () => {
       const original = makeTransferredEntity({ note: 'Some existing note' });
       mockRepository.findById.mockResolvedValue(original);
 
-      const updatedRecord = {
-        ...original,
-        sellingPrice: new Decimal(2500000),
-        receivingPrice: new Decimal(1800000),
-        debtAmount: new Decimal(700000),
-        note: 'Some existing note\n\n[PRICING UPDATE',
-        travelAgency: original.travelAgency,
-        transferBookings: [],
-        transferToAgency: null,
-      };
-      mockPrisma.carBooking.update = jest.fn().mockResolvedValue(updatedRecord);
+      let capturedOriginalData: any;
+
+      mockPrisma.$transaction = jest
+        .fn()
+        .mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+          fn({
+            carBooking: {
+              update: jest
+                .fn()
+                .mockImplementationOnce(async (args: any) => {
+                  capturedOriginalData = args.data;
+                  return {
+                    ...original,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                })
+                .mockResolvedValueOnce({
+                  ...transferBookingStub,
+                  transferBookings: [],
+                  travelAgency: null,
+                  transferToAgency: null,
+                }),
+            },
+          }),
+        );
 
       await service.updateOriginalPricing(
         'car-booking-uuid-1',
@@ -767,9 +886,177 @@ describe('CarBookingService', () => {
         'user-1',
       );
 
-      const updateCall = (mockPrisma.carBooking.update as jest.Mock).mock.calls[0][0];
-      expect(updateCall.data.note).toContain('Some existing note');
-      expect(updateCall.data.note).toContain('[PRICING UPDATE');
+      expect(capturedOriginalData.note).toContain('Some existing note');
+      expect(capturedOriginalData.note).toContain('[PRICING UPDATE');
+    });
+
+    it('throws BadRequestException when transfer booking payment is completed', async () => {
+      mockRepository.findById.mockResolvedValue(
+        makeTransferredEntity({
+          transferBookings: [
+            {
+              ...transferBookingStub,
+              isTransfer: true,
+              paymentStatus: PaymentStatus.completed,
+            },
+          ] as any,
+        }),
+      );
+
+      await expect(
+        service.updateOriginalPricing(
+          'car-booking-uuid-1',
+          { sellingPrice: 2500000, receivingPrice: 1800000 },
+          'user-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when no transfer booking exists', async () => {
+      mockRepository.findById.mockResolvedValue(
+        makeTransferredEntity({ transferBookings: [] }),
+      );
+
+      await expect(
+        service.updateOriginalPricing(
+          'car-booking-uuid-1',
+          { sellingPrice: 2500000, receivingPrice: 1800000 },
+          'user-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('allows receivingPrice = 0 (no_collection) and calculates debtAmount correctly', async () => {
+      const original = makeTransferredEntity();
+      mockRepository.findById.mockResolvedValue(original);
+
+      let capturedOriginalData: any;
+      let capturedTransferData: any;
+
+      mockPrisma.$transaction = jest
+        .fn()
+        .mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+          fn({
+            carBooking: {
+              update: jest
+                .fn()
+                .mockImplementationOnce(async (args: any) => {
+                  capturedOriginalData = args.data;
+                  return {
+                    ...original,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                })
+                .mockImplementationOnce(async (args: any) => {
+                  capturedTransferData = args.data;
+                  return {
+                    ...transferBookingStub,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                }),
+            },
+          }),
+        );
+
+      await service.updateOriginalPricing(
+        'car-booking-uuid-1',
+        { sellingPrice: 2000000, receivingPrice: 0 },
+        'user-1',
+      );
+
+      // Original: debtAmount = 2000000 - 0 = 2000000
+      expect(capturedOriginalData.debtAmount.toString()).toBe('2000000');
+      expect(capturedOriginalData.receivingPrice.toString()).toBe('0');
+      // Transfer: debtAmount = -(2000000 - 0) = -2000000
+      expect(capturedTransferData.receivingPrice.toString()).toBe('0');
+      expect(capturedTransferData.debtAmount.toString()).toBe('-2000000');
+    });
+
+    it('includes reason in audit note when provided', async () => {
+      const original = makeTransferredEntity({ note: null });
+      mockRepository.findById.mockResolvedValue(original);
+
+      let capturedOriginalData: any;
+
+      mockPrisma.$transaction = jest
+        .fn()
+        .mockImplementation(async (fn: (tx: any) => Promise<any>) =>
+          fn({
+            carBooking: {
+              update: jest
+                .fn()
+                .mockImplementationOnce(async (args: any) => {
+                  capturedOriginalData = args.data;
+                  return {
+                    ...original,
+                    ...args.data,
+                    transferBookings: [],
+                    travelAgency: null,
+                    transferToAgency: null,
+                  };
+                })
+                .mockResolvedValueOnce({
+                  ...transferBookingStub,
+                  transferBookings: [],
+                  travelAgency: null,
+                  transferToAgency: null,
+                }),
+            },
+          }),
+        );
+
+      await service.updateOriginalPricing(
+        'car-booking-uuid-1',
+        {
+          sellingPrice: 2500000,
+          receivingPrice: 1800000,
+          reason: 'Client renegotiated',
+        },
+        'user-1',
+      );
+
+      expect(capturedOriginalData.note).toContain('Client renegotiated');
+    });
+
+    it('asserts transferBooking.debtAmount in response DTO', async () => {
+      const original = makeTransferredEntity();
+      mockRepository.findById.mockResolvedValue(original);
+
+      const updatedOriginalRecord = {
+        ...original,
+        sellingPrice: new Decimal(2500000),
+        receivingPrice: new Decimal(1800000),
+        debtAmount: new Decimal(700000),
+        travelAgency: original.travelAgency,
+        transferBookings: [],
+        transferToAgency: null,
+      };
+      const updatedTransferRecord = {
+        ...transferBookingStub,
+        receivingPrice: new Decimal(1800000),
+        debtAmount: new Decimal(-200000),
+        travelAgency: null,
+        transferBookings: [],
+        transferToAgency: null,
+      };
+      mockPrisma.$transaction = makeTxMock(
+        updatedOriginalRecord,
+        updatedTransferRecord,
+      );
+
+      const result = await service.updateOriginalPricing(
+        'car-booking-uuid-1',
+        { sellingPrice: 2500000, receivingPrice: 1800000 },
+        'user-1',
+      );
+
+      expect(result.transferBooking.debtAmount).toBe(-200000);
     });
   });
 });

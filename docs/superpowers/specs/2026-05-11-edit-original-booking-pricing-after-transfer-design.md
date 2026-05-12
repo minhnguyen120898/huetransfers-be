@@ -14,7 +14,7 @@ Once a car booking is transferred to a partner agency, its status becomes `trans
 
 ## Goal
 
-Provide a dedicated endpoint to update `sellingPrice` and `receivingPrice` on a transferred car booking, with `debtAmount` recalculated server-side. The transfer booking (partner compensation) is **not affected**.
+Provide a dedicated endpoint to update `sellingPrice` and `receivingPrice` on a transferred car booking, with `debtAmount` recalculated server-side. The transfer booking's `receivingPrice` and `debtAmount` are also updated in the same transaction (see Business Logic).
 
 ---
 
@@ -33,7 +33,8 @@ Request body:
 
 Response 200:
 {
-  "originalBooking": { ...CarBookingResponseDto }
+  "originalBooking": { ...CarBookingResponseDto },
+  "transferBooking": { ...CarBookingResponseDto }
 }
 
 Error responses:
@@ -59,6 +60,7 @@ Error responses:
 
 ## Business Logic
 
+### Original booking
 - `debtAmount = new Decimal(sellingPrice) - new Decimal(receivingPrice)`
 - Positive `debtAmount` = receivable (agency owes us)
 - Negative `debtAmount` = payable (we owe agency)
@@ -72,7 +74,20 @@ Error responses:
   New debtAmount: C VND
   Reason: <reason if provided>
   ```
-- Single `prisma.carBooking.update()` — no transaction needed (transfer booking untouched)
+
+### Transfer booking (sync required)
+
+The transfer booking's `receivingPrice` is copied from the original at transfer time and represents "what the partner agency collects from the guest" — the same guest, the same service. If the original's `receivingPrice` changes, the transfer booking holds stale data and its `debtAmount` becomes incorrect.
+
+**Formula:**
+```
+transfer.receivingPrice = newReceivingPrice                              (sync)
+transfer.debtAmount     = -(transfer.sellingPrice - newReceivingPrice)  (recalculate)
+```
+
+Where `transfer.sellingPrice` is the current compensation amount (already set, not changed here).
+
+Both updates must be wrapped in a **`prisma.$transaction`**. If either update fails, neither is persisted.
 
 ---
 
@@ -102,7 +117,7 @@ All fields (`sellingPrice`, `receivingPrice`, `debtAmount`, `note`) already exis
 
 | Scenario | Expected |
 |----------|----------|
-| Valid update on transferred booking | 200, updated prices and recalculated debtAmount |
+| Valid update on transferred booking | 200, original prices updated, transfer `receivingPrice` and `debtAmount` recalculated |
 | Booking not found | 404 |
 | Booking status is `confirmed` | 400 |
 | Booking status is `cancelled` | 400 |
@@ -112,11 +127,13 @@ All fields (`sellingPrice`, `receivingPrice`, `debtAmount`, `note`) already exis
 | `receivingPrice` is zero | 400 (pipe validation) |
 | `reason` exceeds 500 chars | 400 (pipe validation) |
 | Note appended correctly | audit block appended to existing note |
+| Transfer booking `receivingPrice` synced | equals original's new `receivingPrice` |
+| Transfer booking `debtAmount` recalculated | `-(compensationAmount - newReceivingPrice)` |
 
 ---
 
 ## Out of Scope
 
-- Transfer booking compensation amount is **not** updated when original pricing changes (independent)
+- Transfer booking `sellingPrice` (compensation amount) is **not** changed — only `receivingPrice` and `debtAmount` are synced
 - No changes to `updateTransferPricing` endpoint
 - No new database migrations

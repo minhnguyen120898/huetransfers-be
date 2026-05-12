@@ -456,7 +456,7 @@ export class CarBookingController {
     description:
       'Edit sellingPrice and receivingPrice on a transferred car booking. ' +
       'debtAmount is recalculated server-side as sellingPrice - receivingPrice. ' +
-      'The linked transfer (compensation) booking is NOT affected.\n\n' +
+      'The linked transfer booking receivingPrice and debtAmount are also synced in the same transaction.\n\n' +
       '**Guards:**\n' +
       '- Booking must have status `transferred`\n' +
       '- Service date must be in the current calendar month\n' +
@@ -473,6 +473,7 @@ export class CarBookingController {
       type: 'object',
       properties: {
         originalBooking: { $ref: '#/components/schemas/CarBookingResponseDto' },
+        transferBooking: { $ref: '#/components/schemas/CarBookingResponseDto' },
       },
     },
   })
@@ -486,7 +487,10 @@ export class CarBookingController {
     @Param('id') id: string,
     @Body(UpdateCarOriginalPricingPipe) dto: UpdateCarOriginalPricingDto,
     @Req() req: FastifyRequest,
-  ): Promise<{ originalBooking: CarBookingResponseDto }> {
+  ): Promise<{
+    originalBooking: CarBookingResponseDto;
+    transferBooking: CarBookingResponseDto;
+  }> {
     const userId = req.user?.id;
     const result = await this.carBookingService.updateOriginalPricing(
       id,
