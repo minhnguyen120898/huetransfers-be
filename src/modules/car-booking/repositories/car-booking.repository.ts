@@ -28,6 +28,7 @@ const CAR_BOOKING_INCLUDE = {
       id: true,
       bookingCode: true,
       status: true,
+      paymentStatus: true,
       debtAmount: true,
       sellingPrice: true,
       receivingPrice: true,
